@@ -1,7 +1,7 @@
 const express = require("express");
 const cors = require("cors");
-const puppeteer = require("puppeteer");
 const axios = require("axios");
+const cheerio = require("cheerio");
 
 const app = express();
 app.use(cors());
@@ -20,7 +20,7 @@ function getCache(key) {
   return item.data;
 }
 
-function setCache(key, data, ttl = 1000 * 60 * 60) {
+function setCache(key, data, ttl = 1000 * 60 * 60 * 24) { // 🔥 24h
   cache.set(key, {
     data,
     expire: Date.now() + ttl,
@@ -44,74 +44,53 @@ function slug(text) {
   return normalize(text).replace(/\s+/g, "-");
 }
 
+/// 🔥 NOVA FUNÇÃO (SEM PUPPETEER)
 async function buscarCifraCifraClub(title, artist) {
   const cacheKey = `cifra-${title}-${artist}`;
   const cached = getCache(cacheKey);
   if (cached) return cached;
 
-  const browser = await puppeteer.launch({
-    headless: "new",
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
-
-  const page = await browser.newPage();
-
   try {
     const query = `${title} ${artist}`;
 
-    await page.goto(
-      `https://www.cifraclub.com.br/?q=${encodeURIComponent(query)}`,
-      { waitUntil: "networkidle2" }
+    const search = await axios.get(
+      `https://www.cifraclub.com.br/?q=${encodeURIComponent(query)}`
     );
 
-    const link = await page.evaluate(() => {
-      const anchors = document.querySelectorAll("a");
+    const $ = cheerio.load(search.data);
 
-      for (let a of anchors) {
-        const href = a.href;
-        if (!href) continue;
+    let link = null;
 
-        if (
-          href.includes("cifraclub.com.br") &&
-          !href.includes("?") &&
-          !href.includes("letra")
-        ) {
-          const parts = href.split("cifraclub.com.br/")[1];
-          if (!parts) continue;
+    $("a").each((_, el) => {
+      const href = $(el).attr("href");
 
-          const segments = parts.split("/").filter(Boolean);
-          if (segments.length === 2) return href;
-        }
+      if (
+        href &&
+        href.includes("cifraclub.com.br") &&
+        !href.includes("?") &&
+        !href.includes("letra")
+      ) {
+        link = href;
+        return false;
       }
-
-      return null;
     });
 
-    if (!link) {
-      await browser.close();
-      return null;
-    }
+    if (!link) return null;
 
-    await page.goto(link, { waitUntil: "domcontentloaded" });
+    const page = await axios.get(link);
+    const $$ = cheerio.load(page.data);
 
-    await page.waitForSelector(".cifra_cnt, pre, #js-tab-content");
+    const cifra =
+      $$(".cifra_cnt").text() ||
+      $$("pre").text() ||
+      $$("#js-tab-content").text();
 
-    const cifra = await page.evaluate(() => {
-      const el =
-        document.querySelector(".cifra_cnt") ||
-        document.querySelector("pre") ||
-        document.querySelector("#js-tab-content");
+      const result = cifra ? cifra.trim() : null;
 
-      return el ? el.innerText.trim() : null;
-    });
+    setCache(cacheKey, result);
 
-    await browser.close();
-
-    setCache(cacheKey, cifra);
-
-    return cifra;
+    return result;
   } catch (e) {
-    await browser.close();
     return null;
   }
 }
