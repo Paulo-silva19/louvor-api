@@ -20,7 +20,7 @@ function getCache(key) {
   return item.data;
 }
 
-function setCache(key, data, ttl = 1000 * 60 * 60 * 24) { // 🔥 24h
+function setCache(key, data, ttl = 1000 * 60 * 60 * 24) {
   cache.set(key, {
     data,
     expire: Date.now() + ttl,
@@ -44,7 +44,7 @@ function slug(text) {
   return normalize(text).replace(/\s+/g, "-");
 }
 
-/// 🔥 NOVA FUNÇÃO (SEM PUPPETEER)
+/// 🔥 BUSCAR CIFRA
 async function buscarCifraCifraClub(title, artist) {
   const cacheKey = `cifra-${title}-${artist}`;
   const cached = getCache(cacheKey);
@@ -85,13 +85,27 @@ async function buscarCifraCifraClub(title, artist) {
       $$("pre").text() ||
       $$("#js-tab-content").text();
 
-      const result = cifra ? cifra.trim() : null;
+    const result = cifra ? cifra.trim() : null;
 
     setCache(cacheKey, result);
 
     return result;
   } catch (e) {
     return null;
+  }
+}
+
+/// 🔥 BUSCAR TOM
+async function buscarTomCifraClub(url) {
+  try {
+    const response = await axios.get(url);
+    const html = response.data;
+
+    const match = html.match(/Tom:\s*([A-G][#b]?)/);
+
+    return match ? match[1] : "";
+  } catch (e) {
+    return "";
   }
 }
 
@@ -133,7 +147,7 @@ app.get("/search-music", async (req, res) => {
   }
 });
 
-/// 🎸 FULL
+/// 🎸 FULL (AGORA COM TOM 🔥)
 app.get("/music-full", async (req, res) => {
   try {
     const title = normalize(req.query.title || "");
@@ -143,15 +157,21 @@ app.get("/music-full", async (req, res) => {
     const cached = getCache(cacheKey);
     if (cached) return res.json(cached);
 
+    const cifraUrl = `https://www.cifraclub.com.br/${slug(
+      artist
+    )}/${slug(title)}/`;
+
     const cifra = await buscarCifraCifraClub(title, artist);
+
+    /// 🔥 NOVO
+    const tom = await buscarTomCifraClub(cifraUrl);
 
     const result = {
       title,
       artist,
       cifra,
-      cifraUrl: `https://www.cifraclub.com.br/${slug(
-        artist
-      )}/${slug(title)}/`,
+      tom, // 🔥 AQUI
+      cifraUrl,
       letraUrl: `https://www.letras.mus.br/${slug(
         artist
       )}/${slug(title)}/`,
